@@ -1,0 +1,12 @@
+in python3
+
+python3 main.py --maxdisp 192 \
+               --model stackhourglass \
+               --datapath home/wpf/data/data_sf/training/
+               --epochs 10 \
+               --loadmodel \
+               --savemodel /home/wpf/pkg/psmnet/pretrained/
+
+python3 /home/wpf/pkg/psmnet/finetune.py --maxdisp 192 --model stackhourglass --datatype 2015 --datapath /home/wpf/data/data_scene_flow/training/ --epochs 300 --loadmodel /home/wpf/pkg/psmnet/pretrained/pretrained_model_KITTI2015.tar --savemodel /home/wpf/pkg/psmnet/pretrained/
+
+

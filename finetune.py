@@ -28,18 +28,19 @@ parser.add_argument('--model', default='stackhourglass',
                     help='select model')
 parser.add_argument('--datatype', default='2015',
                     help='datapath')
-parser.add_argument('--datapath', default='/media/jiaren/ImageNet/data_scene_flow_2015/training/',
+parser.add_argument('--datapath', default='/home/wpf/data/data_scene_flow/training/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=300,
                     help='number of epochs to train')
-parser.add_argument('--loadmodel', default='./trained/submission_model.tar',
+parser.add_argument('--loadmodel', default='./pretrained/pretrained_model_KITTI2015.tar',
                     help='load model')
-parser.add_argument('--savemodel', default='./',
+parser.add_argument('--savemodel', default='./pretrained/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
+args = parser.parse_args()
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 torch.manual_seed(args.seed)
@@ -55,11 +56,11 @@ all_left_img, all_right_img, all_left_disp, test_left_img, test_right_img, test_
 
 TrainImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True), 
-         batch_size= 12, shuffle= True, num_workers= 8, drop_last=False)
+         batch_size= 3, shuffle= True, num_workers= 8, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False), 
-         batch_size= 8, shuffle= False, num_workers= 4, drop_last=False)
+         batch_size= 2, shuffle= False, num_workers= 4, drop_last=False)
 
 if args.model == 'stackhourglass':
     model = stackhourglass(args.maxdisp)
@@ -144,50 +145,50 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def main():
-	max_acc=0
-	max_epo=0
-	start_full_time = time.time()
+    max_acc=0
+    max_epo=0
+    start_full_time = time.time()
 
-	for epoch in range(1, args.epochs+1):
-	   total_train_loss = 0
-	   total_test_loss = 0
-	   adjust_learning_rate(optimizer,epoch)
+    for epoch in range(1, args.epochs+1):
+       total_train_loss = 0
+       total_test_loss = 0
+       adjust_learning_rate(optimizer,epoch)
            
                ## training ##
-           for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
-               start_time = time.time() 
+       for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
+           start_time = time.time()
 
-               loss = train(imgL_crop,imgR_crop, disp_crop_L)
-	       print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
-	       total_train_loss += loss
-	   print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
-	   
+           loss = train(imgL_crop,imgR_crop, disp_crop_L)
+           print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
+           total_train_loss += loss
+       print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
+
                ## Test ##
 
-           for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
-               test_loss = test(imgL,imgR, disp_L)
-               print('Iter %d 3-px error in val = %.3f' %(batch_idx, test_loss*100))
-               total_test_loss += test_loss
+       for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
+           test_loss = test(imgL,imgR, disp_L)
+           print('Iter %d 3-px error in val = %.3f' %(batch_idx, test_loss*100))
+           total_test_loss += test_loss
 
 
-	   print('epoch %d total 3-px error in val = %.3f' %(epoch, total_test_loss/len(TestImgLoader)*100))
-	   if total_test_loss/len(TestImgLoader)*100 > max_acc:
-		max_acc = total_test_loss/len(TestImgLoader)*100
-		max_epo = epoch
-	   print('MAX epoch %d total test error = %.3f' %(max_epo, max_acc))
+       print('epoch %d total 3-px error in val = %.3f' %(epoch, total_test_loss/len(TestImgLoader)*100))
+       if total_test_loss/len(TestImgLoader)*100 > max_acc:
+        max_acc = total_test_loss/len(TestImgLoader)*100
+        max_epo = epoch
+       print('MAX epoch %d total test error = %.3f' %(max_epo, max_acc))
 
-	   #SAVE
-	   savefilename = args.savemodel+'finetune_'+str(epoch)+'.tar'
-	   torch.save({
-		    'epoch': epoch,
-		    'state_dict': model.state_dict(),
-		    'train_loss': total_train_loss/len(TrainImgLoader),
-		    'test_loss': total_test_loss/len(TestImgLoader)*100,
-		}, savefilename)
-	
-        print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
-	print(max_epo)
-	print(max_acc)
+       #SAVE
+       savefilename = args.savemodel+'finetune_'+str(epoch)+'.tar'
+       torch.save({
+            'epoch': epoch,
+            'state_dict': model.state_dict(),
+            'train_loss': total_train_loss/len(TrainImgLoader),
+            'test_loss': total_test_loss/len(TestImgLoader)*100,
+        }, savefilename)
+
+       print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
+       print(max_epo)
+       print(max_acc)
 
 
 if __name__ == '__main__':
