@@ -24,7 +24,7 @@ from models import *
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--KITTI', default='2015',
                     help='KITTI version')
-parser.add_argument('--datapath', default='/media/jiaren/ImageNet/data_scene_flow_2015/testing/',
+parser.add_argument('--datapath', default='~/data/data_scene_flow_2015/testing/',
                     help='select model')
 parser.add_argument('--loadmodel', default=None,
                     help='loading model')
@@ -36,6 +36,8 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
+parser.add_argument('--savepath', default='./disp/',
+                    help='save disparity')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -109,7 +111,7 @@ def main():
        top_pad   = 384-imgL_o.shape[0]
        left_pad  = 1248-imgL_o.shape[1]
        img = pred_disp[top_pad:,:-left_pad]
-       skimage.io.imsave(test_left_img[inx].split('/')[-1],(img*256).astype('uint16'))
+       skimage.io.imsave(os.path.join(args.savepath, test_left_img[inx].split('/')[-1]),(img*256).astype('uint16'))
 
 if __name__ == '__main__':
    main()

@@ -55,11 +55,11 @@ all_left_img, all_right_img, all_left_disp, test_left_img, test_right_img, test_
 
 TrainImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True), 
-         batch_size= 12, shuffle= True, num_workers= 8, drop_last=False)
+         batch_size= 3, shuffle= True, num_workers= 8, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False), 
-         batch_size= 8, shuffle= False, num_workers= 4, drop_last=False)
+         batch_size= 2, shuffle= False, num_workers= 4, drop_last=False)
 
 if args.model == 'stackhourglass':
     model = stackhourglass(args.maxdisp)
@@ -126,7 +126,7 @@ def test(imgL,imgR,disp_true):
 
         #computing 3-px error#
         true_disp = disp_true
-        index = np.argwhere(true_disp>0)
+        index = np.argwhere(true_disp.numpy()>0).transpose()
         disp_true[index[0][:], index[1][:], index[2][:]] = np.abs(true_disp[index[0][:], index[1][:], index[2][:]]-pred_disp[index[0][:], index[1][:], index[2][:]])
         correct = (disp_true[index[0][:], index[1][:], index[2][:]] < 3)+(disp_true[index[0][:], index[1][:], index[2][:]] < true_disp[index[0][:], index[1][:], index[2][:]]*0.05)      
         torch.cuda.empty_cache()
