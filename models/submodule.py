@@ -9,9 +9,9 @@ import numpy as np
 
 def convbn(in_planes, out_planes, kernel_size, stride, pad, dilation):
 
-    return nn.Sequential(nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=dilation, dilation = dilation, bias=False),
+    return nn.Sequential(nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride,
+                                   padding=dilation if dilation > 1 else pad, dilation=dilation, bias=False),
                          nn.BatchNorm2d(out_planes))
-
 
 def convbn_3d(in_planes, out_planes, kernel_size, stride, pad):
 
