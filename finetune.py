@@ -32,9 +32,9 @@ parser.add_argument('--datapath', default='/home/wpf/data/data_scene_flow/traini
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=300,
                     help='number of epochs to train')
-parser.add_argument('--loadmodel', default='./trained/submission_model.tar',
+parser.add_argument('--loadmodel', default='./pretrained/pretrained_model_KITTI2015.tar',
                     help='load model')
-parser.add_argument('--savemodel', default='./',
+parser.add_argument('--savemodel', default='./finetuned/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')

@@ -28,7 +28,7 @@ parser.add_argument('--epochs', type=int, default=10,
                     help='number of epochs to train')
 parser.add_argument('--loadmodel', default= None,
                     help='load model')
-parser.add_argument('--savemodel', default='./',
+parser.add_argument('--savemodel', default='./finetuned/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
