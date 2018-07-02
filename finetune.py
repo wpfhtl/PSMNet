@@ -34,7 +34,7 @@ parser.add_argument('--epochs', type=int, default=300,
                     help='number of epochs to train')
 parser.add_argument('--loadmodel', default='./pretrained/pretrained_model_KITTI2015.tar',
                     help='load model')
-parser.add_argument('--savemodel', default='./pretrained/',
+parser.add_argument('--savemodel', default='./finetuned/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
@@ -102,11 +102,13 @@ def train(imgL,imgR,disp_L):
             output1 = torch.squeeze(output1,1)
             output2 = torch.squeeze(output2,1)
             output3 = torch.squeeze(output3,1)
-            loss = 0.5*F.smooth_l1_loss(output1[mask], disp_true[mask], size_average=True) + 0.7*F.smooth_l1_loss(output2[mask], disp_true[mask], size_average=True) + F.smooth_l1_loss(output3[mask], disp_true[mask], size_average=True) 
+            loss = 0.5*F.smooth_l1_loss(output1[mask], disp_true[mask], size_average=True)\
+                   + 0.7*F.smooth_l1_loss(output2[mask], disp_true[mask], size_average=True)\
+                   + F.smooth_l1_loss(output3[mask], disp_true[mask], size_average=True)
         elif args.model == 'basic':
             output = model(imgL,imgR)
-            output = torch.squeeze(output3,1)
-            loss = F.smooth_l1_loss(output3[mask], disp_true[mask], size_average=True)
+            output = torch.squeeze(output,1)
+            loss = F.smooth_l1_loss(output[mask], disp_true[mask], size_average=True)
 
         loss.backward()
         optimizer.step()
@@ -127,12 +129,12 @@ def test(imgL,imgR,disp_true):
 
         #computing 3-px error#
         true_disp = disp_true
-        index = np.argwhere(true_disp>0)
+        index = np.argwhere(true_disp.numpy() > 0).transpose()
         disp_true[index[0][:], index[1][:], index[2][:]] = np.abs(true_disp[index[0][:], index[1][:], index[2][:]]-pred_disp[index[0][:], index[1][:], index[2][:]])
         correct = (disp_true[index[0][:], index[1][:], index[2][:]] < 3)+(disp_true[index[0][:], index[1][:], index[2][:]] < true_disp[index[0][:], index[1][:], index[2][:]]*0.05)      
         torch.cuda.empty_cache()
 
-        return float(torch.sum(correct))/float(len(index[0]))
+        return (1 - float(torch.sum(correct)) / float(len(index[0])))
 
 def adjust_learning_rate(optimizer, epoch):
     if epoch <= 200:
