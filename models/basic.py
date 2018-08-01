@@ -8,10 +8,10 @@ import math
 from submodule import *
 
 class PSMNet(nn.Module):
-    def __init__(self, maxdisp):
+    def __init__(self, maxdisp, colormode):
         super(PSMNet, self).__init__()
         self.maxdisp = maxdisp
-        self.feature_extraction = feature_extraction()
+        self.feature_extraction = feature_extraction(colormode)
 
 ########
         self.dres0 = nn.Sequential(convbn_3d(64, 32, 3, 1, 1),

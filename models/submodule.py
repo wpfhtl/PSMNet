@@ -64,15 +64,23 @@ class disparityregression(nn.Module):
         return out
 
 class feature_extraction(nn.Module):
-    def __init__(self):
+    def __init__(self, colormode):
         super(feature_extraction, self).__init__()
         self.inplanes = 32
-        self.firstconv = nn.Sequential(convbn(3, 32, 3, 2, 1, 1),
-                                       nn.ReLU(inplace=True),
-                                       convbn(32, 32, 3, 1, 1, 1),
-                                       nn.ReLU(inplace=True),
-                                       convbn(32, 32, 3, 1, 1, 1),
-                                       nn.ReLU(inplace=True))
+        if colormode == 1:
+            self.firstconv = nn.Sequential(convbn(3, 32, 3, 2, 1, 1),
+                                           nn.ReLU(inplace=True),
+                                           convbn(32, 32, 3, 1, 1, 1),
+                                           nn.ReLU(inplace=True),
+                                           convbn(32, 32, 3, 1, 1, 1),
+                                           nn.ReLU(inplace=True))
+        else:
+            self.firstconv = nn.Sequential(convbn(1, 32, 3, 2, 1, 1),
+                                           nn.ReLU(inplace=True),
+                                           convbn(32, 32, 3, 1, 1, 1),
+                                           nn.ReLU(inplace=True),
+                                           convbn(32, 32, 3, 1, 1, 1),
+                                           nn.ReLU(inplace=True))
 
         self.layer1 = self._make_layer(BasicBlock, 32, 3, 1,1,1)
         self.layer2 = self._make_layer(BasicBlock, 64, 16, 2,1,1) 

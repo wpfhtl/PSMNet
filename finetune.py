@@ -20,6 +20,7 @@ from dataloader import KITTIloader2015 as ls
 from dataloader import KITTILoader as DA
 
 from models import *
+from logger import Logger
 
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--maxdisp', type=int ,default=192,
@@ -40,6 +41,8 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
+parser.add_argument('--colormode', type=int, default=1,
+                    help='load image as RGB or gray')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 torch.manual_seed(args.seed)
@@ -54,17 +57,17 @@ elif args.datatype == '2012':
 all_left_img, all_right_img, all_left_disp, test_left_img, test_right_img, test_left_disp = ls.dataloader(args.datapath)
 
 TrainImgLoader = torch.utils.data.DataLoader(
-         DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True), 
+         DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True, colormode=args.colormode),
          batch_size= 3, shuffle= True, num_workers= 8, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
-         DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False), 
+         DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False, colormode=args.colormode),
          batch_size= 2, shuffle= False, num_workers= 4, drop_last=False)
 
 if args.model == 'stackhourglass':
-    model = stackhourglass(args.maxdisp)
+    model = stackhourglass(args.maxdisp, colormode=args.colormode)
 elif args.model == 'basic':
-    model = basic(args.maxdisp)
+    model = basic(args.maxdisp, colormode=args.colormode)
 else:
     print('no model')
 
@@ -79,6 +82,8 @@ if args.loadmodel is not None:
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
 optimizer = optim.Adam(model.parameters(), lr=0.1, betas=(0.9, 0.999))
+
+logger = Logger('./logs')
 
 def train(imgL,imgR,disp_L):
         model.train()
@@ -113,17 +118,17 @@ def train(imgL,imgR,disp_L):
         loss.backward()
         optimizer.step()
 
-        return loss.data[0]
+        return loss.item() # loss.data[0]
 
 def test(imgL,imgR,disp_true):
         model.eval()
-        imgL   = Variable(torch.FloatTensor(imgL))
-        imgR   = Variable(torch.FloatTensor(imgR))   
+        imgL = Variable(torch.FloatTensor(imgL))
+        imgR = Variable(torch.FloatTensor(imgR))
         if args.cuda:
             imgL, imgR = imgL.cuda(), imgR.cuda()
 
         with torch.no_grad():
-            output3 = model(imgL,imgR)
+            output3 = model(imgL, imgR)
 
         pred_disp = output3.data.cpu()
 
@@ -138,59 +143,80 @@ def test(imgL,imgR,disp_true):
 
 def adjust_learning_rate(optimizer, epoch):
     if epoch <= 200:
-       lr = 0.001
+        lr = 0.001
     else:
-       lr = 0.0001
+        lr = 0.0001
     print(lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
 
 def main():
-	max_acc=0
-	max_epo=0
-	start_full_time = time.time()
+    max_acc=0
+    max_epo=0
+    start_full_time = time.time()
 
-	for epoch in range(1, args.epochs+1):
-	   total_train_loss = 0
-	   total_test_loss = 0
-	   adjust_learning_rate(optimizer,epoch)
+    for epoch in range(1, args.epochs+1):
+        total_train_loss = 0
+        total_test_loss = 0
+        adjust_learning_rate(optimizer,epoch)
            
-               ## training ##
-           for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
-               start_time = time.time() 
+        ## training ##
+        for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
+            start_time = time.time()
 
-               loss = train(imgL_crop,imgR_crop, disp_crop_L)
-	       print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
-	       total_train_loss += loss
-	   print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
-	   
-               ## Test ##
+            loss = train(imgL_crop,imgR_crop, disp_crop_L)
+        print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
+        total_train_loss += loss
+        print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
 
-           for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
-               test_loss = test(imgL,imgR, disp_L)
-               print('Iter %d 3-px error in val = %.3f' %(batch_idx, test_loss*100))
-               total_test_loss += test_loss
+        ## Test ##
+
+        for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
+            test_loss = test(imgL,imgR, disp_L)
+            print('Iter %d 3-px error in val = %.3f' %(batch_idx, test_loss*100))
+            total_test_loss += test_loss
 
 
-	   print('epoch %d total 3-px error in val = %.3f' %(epoch, total_test_loss/len(TestImgLoader)*100))
-	   if total_test_loss/len(TestImgLoader)*100 > max_acc:
-		max_acc = total_test_loss/len(TestImgLoader)*100
-		max_epo = epoch
-	   print('MAX epoch %d total test error = %.3f' %(max_epo, max_acc))
+        print('epoch %d total 3-px error in val = %.3f' %(epoch, total_test_loss/len(TestImgLoader)*100))
+        if total_test_loss/len(TestImgLoader)*100 < max_acc:
+            max_acc = total_test_loss/len(TestImgLoader)*100
+            max_epo = epoch
+        print('MAX epoch %d total test error = %.3f' %(max_epo, max_acc))
 
-	   #SAVE
-	   savefilename = args.savemodel+'finetune_'+str(epoch)+'.tar'
-	   torch.save({
-		    'epoch': epoch,
-		    'state_dict': model.state_dict(),
-		    'train_loss': total_train_loss/len(TrainImgLoader),
-		    'test_loss': total_test_loss/len(TestImgLoader)*100,
-		}, savefilename)
-	
+        #SAVE
+        savefilename = args.savemodel+'finetune_'+str(epoch)+'.tar'
+        torch.save({
+            'epoch': epoch,
+            'state_dict': model.state_dict(),
+            'train_loss': total_train_loss/len(TrainImgLoader),
+            'test_loss': total_test_loss/len(TestImgLoader)*100,
+        }, savefilename)
+
         print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
-	print(max_epo)
-	print(max_acc)
+        print(max_epo)
+        print(max_acc)
+
+        # ================================================================== #
+        #                        Tensorboard Logging                         #
+        # ================================================================== #
+
+        # 1. Log scalar values (scalar summary)
+        info = {'train/loss:': total_train_loss, 'test/loss': total_test_loss}
+        for tag, value in info.items():
+            logger.scalar_summary(tag, value, epoch + 1)
+
+        # 2. Log values and gradients of the parameters (histogram summary)
+        for tag, value in model.named_parameters():
+            tag = tag.replace('.', '/')
+            logger.histo_summary(tag, value.data.cpu().numpy(), epoch+1)
+            logger.histo_summary(tag+'/grad', value.grad.data.cpu().numpy(), epoch+1)
+
+        # 3. weights of network
+        # weights_list = {'fc1_weights': model.module.feature_extraction.firstconv._modules['2']._modules['0'].weight.data.cpu().numpy(),
+        #                 'fc2_weights': }
+        # for tag, weights in weights_list.items():
+        #     logger.image_summary(tag, weights, epoch + 1)
 
 
 if __name__ == '__main__':

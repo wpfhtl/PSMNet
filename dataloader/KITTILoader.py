@@ -16,15 +16,18 @@ IMG_EXTENSIONS = [
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
 
-def default_loader(path):
-    return Image.open(path).convert('RGB')
+def default_loader(path, colormode=1):
+    if colormode == 1:
+        return Image.open(path).convert('RGB')
+    else:
+        return Image.open(path).convert('L')
 
 def disparity_loader(path):
     return Image.open(path)
 
 
 class myImageFloder(data.Dataset):
-    def __init__(self, left, right, left_disparity, training, loader=default_loader, dploader= disparity_loader):
+    def __init__(self, left, right, left_disparity, training, loader=default_loader, dploader=disparity_loader, colormode=1):
  
         self.left = left
         self.right = right
@@ -32,14 +35,15 @@ class myImageFloder(data.Dataset):
         self.loader = loader
         self.dploader = dploader
         self.training = training
+        self.colormode = colormode
 
     def __getitem__(self, index):
         left  = self.left[index]
         right = self.right[index]
         disp_L= self.disp_L[index]
 
-        left_img = self.loader(left)
-        right_img = self.loader(right)
+        left_img = self.loader(left, colormode=self.colormode)
+        right_img = self.loader(right, colormode=self.colormode)
         dataL = self.dploader(disp_L)
 
 

@@ -18,12 +18,10 @@ import time
 import math
 from utils import preprocess 
 from models import *
+from PIL import Image
 
-# 2012 data /media/jiaren/ImageNet/data_scene_flow_2012/testing/
 
 parser = argparse.ArgumentParser(description='PSMNet')
-parser.add_argument('--KITTI', default='2015',
-                    help='KITTI version')
 parser.add_argument('--datapath', default='~/data/data_scene_flow_2015/testing/',
                     help='select model')
 parser.add_argument('--loadmodel', default=None,
@@ -38,7 +36,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--savepath', default='./disp/',
                     help='save disparity')
-parser.add_argument('--colormode', type=int, default=1,
+parser.add_argument('--colormode', type=int, default=0,
                     help='load image as RGB or gray')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -47,11 +45,7 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
-if args.KITTI == '2015':
-   from dataloader import KITTI_submission_loader as DA
-else:
-   from dataloader import KITTI_submission_loader2012 as DA  
-
+from dataloader import sensor_data_loader as DA
 
 test_left_img, test_right_img = DA.dataloader(args.datapath)
 
@@ -70,6 +64,12 @@ if args.loadmodel is not None:
     model.load_state_dict(state_dict['state_dict'])
 
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
+
+def default_loader(path, colormode=1):
+    if colormode == 1:
+        return Image.open(path).convert('RGB')
+    else:
+        return Image.open(path).convert('L')
 
 def test(imgL,imgR):
         model.eval()
@@ -102,25 +102,29 @@ def main():
            imgR = np.reshape(imgR,[1,3,imgR.shape[1],imgR.shape[2]])
        else:
            asgray = True
-           imgL_o = (skimage.io.imread(test_left_img[inx], as_gray=asgray).astype('float32'))
-           imgR_o = (skimage.io.imread(test_right_img[inx], as_gray=asgray).astype('float32'))
-           imgL = np.reshape(imgL_o,[1,1,imgL_o.shape[0],imgL_o.shape[1]])
-           imgR = np.reshape(imgR_o,[1,1,imgR_o.shape[0],imgR_o.shape[1]])
+           imgL = (skimage.io.imread(test_left_img[inx], as_gray=asgray).astype('float32'))
+           imgR = (skimage.io.imread(test_right_img[inx], as_gray=asgray).astype('float32'))
+           imgL = np.reshape(imgL,[1,1,imgL.shape[0],imgL.shape[1]])
+           imgR = np.reshape(imgR,[1,1,imgR.shape[0],imgR.shape[1]])
 
        # pad to (384, 1248)
-       top_pad = 384-imgL.shape[2]
-       left_pad = 1248-imgL.shape[3]
-       imgL = np.lib.pad(imgL,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
-       imgR = np.lib.pad(imgR,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
+       # top_pad = 384-imgL.shape[2]
+       # left_pad = 704-imgL.shape[3]
+       # imgL = np.lib.pad(imgL,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
+       # imgR = np.lib.pad(imgR,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
+       # imgL = np.lib.pad(imgL,((0,0),(0,0),(top_pad,0),(0,0)),mode='constant',constant_values=0)
+       # imgR = np.lib.pad(imgR,((0,0),(0,0),(top_pad,0),(0,0)),mode='constant',constant_values=0)
 
        start_time = time.time()
        pred_disp = test(imgL,imgR)
        print('time = %.2f' %(time.time() - start_time))
 
-       top_pad   = 384-imgL_o.shape[0]
-       left_pad  = 1248-imgL_o.shape[1]
-       img = pred_disp[top_pad:,:-left_pad]
-       skimage.io.imsave(os.path.join(args.savepath, test_left_img[inx].split('/')[-1]),(img*256).astype('uint16'))
+       # top_pad   = 384-imgL_o.shape[0]
+       # left_pad  = 704-imgL_o.shape[1]
+       # img = pred_disp[top_pad:,:-left_pad]
+       # img = pred_disp[top_pad:,:]
+       # skimage.io.imsave(os.path.join(args.savepath, test_left_img[inx].split('/')[-1]),(pred_disp*256).astype('uint16'))
+       skimage.io.imsave(os.path.join(args.savepath, test_left_img[inx].split('/')[-1]), (pred_disp).astype('uint8'))
 
 if __name__ == '__main__':
    main()
