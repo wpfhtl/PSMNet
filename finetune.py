@@ -20,6 +20,9 @@ from dataloader import KITTIloader2015 as ls
 from dataloader import KITTILoader as DA
 
 from models import *
+from tensorboardX import SummaryWriter
+import torchvision.utils as vutils
+from submodule import *
 
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--maxdisp', type=int ,default=192,
@@ -79,7 +82,9 @@ if args.loadmodel is not None:
 
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
+# feature_model = feature_extraction()
 optimizer = optim.Adam(model.parameters(), lr=0.1, betas=(0.9, 0.999))
+writer = SummaryWriter()
 
 def train(imgL,imgR,disp_L):
         model.train()
@@ -113,12 +118,12 @@ def train(imgL,imgR,disp_L):
         loss.backward()
         optimizer.step()
 
-        return loss.data[0]
+        return loss.item()
 
 def test(imgL,imgR,disp_true):
         model.eval()
-        imgL   = Variable(torch.FloatTensor(imgL))
-        imgR   = Variable(torch.FloatTensor(imgR))   
+        imgL = Variable(torch.FloatTensor(imgL))
+        imgR = Variable(torch.FloatTensor(imgR))
         if args.cuda:
             imgL, imgR = imgL.cuda(), imgR.cuda()
 
@@ -138,9 +143,9 @@ def test(imgL,imgR,disp_true):
 
 def adjust_learning_rate(optimizer, epoch):
     if epoch <= 200:
-       lr = 0.001
+        lr = 0.001
     else:
-       lr = 0.0001
+        lr = 0.0001
     print(lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -150,6 +155,14 @@ def main():
     max_acc=0
     max_epo=0
     start_full_time = time.time()
+
+    inputL = Variable(torch.rand(1, 3, 256, 512))
+    inputR = Variable(torch.rand(1, 3, 256, 512))
+    # with SummaryWriter(comment='test') as w:
+    #     writer.add_graph(model, (inputL, inputR))
+    # writer.add_graph(model, (inputL, inputR))
+    # with SummaryWriter(comment='feature_net') as w:
+    #     w.add_graph(feature_model, (inputL, ))
 
     for epoch in range(1, args.epochs+1):
        total_train_loss = 0
@@ -188,10 +201,11 @@ def main():
             'test_loss': total_test_loss/len(TestImgLoader)*100,
         }, savefilename)
 
-       print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
-       print(max_epo)
-       print(max_acc)
+        print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
+        print(max_epo)
+        print(max_acc)
 
+        writer.add_scalar("best_test", max_acc, epoch + 1)
 
 if __name__ == '__main__':
    main()
