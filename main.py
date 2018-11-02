@@ -16,6 +16,8 @@ import math
 from dataloader import listflowfile as lt
 from dataloader import SecenFlowLoader as DA
 from models import *
+from tensorboardX import SummaryWriter
+import torchvision.utils as vutils
 
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--maxdisp', type=int ,default=192,
@@ -39,6 +41,9 @@ parser.add_argument('--colormode', type=int, default=1,
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+train_batch = 12
+test_batch = 3
+
 torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
@@ -47,11 +52,11 @@ all_left_img, all_right_img, all_left_disp, test_left_img, test_right_img, test_
 
 TrainImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True, colormode=args.colormode),
-         batch_size= 3, shuffle= True, num_workers= 8, drop_last=False)
+         batch_size= train_batch, shuffle= True, num_workers= 8, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False, colormode=args.colormode),
-         batch_size= 2, shuffle= False, num_workers= 4, drop_last=False)
+         batch_size= test_batch, shuffle= False, num_workers= 4, drop_last=False)
 
 
 if args.model == 'stackhourglass':
@@ -69,9 +74,20 @@ if args.loadmodel is not None:
     state_dict = torch.load(args.loadmodel)
     model.load_state_dict(state_dict['state_dict'])
 
+start_ind = 1
+print(model)
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
-
+pretrained_items = 0
+for i, p in enumerate(model.parameters()):
+    print(i, p.shape)
+    if i < 246:
+        p.requires_grad = False
+    pretrained_items += 1
+    # p.requires_grad = False
+optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001, betas=(0.9, 0.999))
+# optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))  # 259
 optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
+writer = SummaryWriter()
 
 def train(imgL,imgR, disp_L):
         model.train()
@@ -102,7 +118,7 @@ def train(imgL,imgR, disp_L):
         loss.backward()
         optimizer.step()
 
-        return loss.data[0]
+        return loss.item(), output3.data.cpu()
 
 def test(imgL,imgR,disp_true):
         model.eval()
@@ -125,7 +141,7 @@ def test(imgL,imgR,disp_true):
         else:
            loss = torch.mean(torch.abs(output[mask]-disp_true[mask]))  # end-point-error
 
-        return loss
+        return loss, output
 
 def adjust_learning_rate(optimizer, epoch):
     lr = 0.001
@@ -135,45 +151,72 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def main():
-
+    train_step = 0
+    test_step = 0
     start_full_time = time.time()
-    for epoch in range(1, args.epochs+1):
-        print('This is %d-th epoch' %(epoch))
+
+    #------------- TEST ------------------------------------------------------------
+
+    ## Test ##
+    total_test_loss = 0
+    for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
+        test_loss, dleft = test(imgL, imgR, disp_L)
+        print('Iter %d test loss in val = %.3f' % (batch_idx, test_loss))
+        total_test_loss += test_loss
+        test_step += 1
+        writer.add_scalar("test/batch_error", test_loss, test_step)
+        img_display = torch.cat([disp_L, dleft], 0)
+        img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                       normalize=True, scale_each=True, nrow=test_batch)
+        writer.add_image("test/dleft", img_display, test_step)
+    writer.add_scalar("test/epoch_error", total_test_loss / len(TestImgLoader), 0)
+    print('epoch %d total test loss in val = %.3f' % (0, total_test_loss / len(TestImgLoader)))
+
+    #----------------------------------------------------------------------------------
+    for epoch in range(start_ind, args.epochs + 1):
+        print('This is %d-th epoch' % (epoch))
         total_train_loss = 0
-        adjust_learning_rate(optimizer,epoch)
+        adjust_learning_rate(optimizer, epoch)
 
         ## training ##
         for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
             start_time = time.time()
-
-            loss = train(imgL_crop,imgR_crop, disp_crop_L)
-            print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
+            loss, dleft = train(imgL_crop, imgR_crop, disp_crop_L)
+            print('Iter %d training loss = %.3f, time = %.2f' % (batch_idx,
+                                        loss, time.time() - start_time))
             total_train_loss += loss
-        print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
+            train_step += 1
+            writer.add_scalar("train/batch_error", loss, train_step)
+            img_display = torch.cat([disp_crop_L, dleft], 0)
+            img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                           normalize=True, scale_each=True, nrow=train_batch)
+            writer.add_image("train/dleft", img_display, train_step)
+        writer.add_scalar("train/epoch_error", total_train_loss / len(TrainImgLoader), epoch)
+        print('epoch %d total training loss = %.3f' % (epoch, total_train_loss / len(TrainImgLoader)))
 
-        #SAVE
-        savefilename = args.savemodel+'/checkpoint_'+str(epoch)+'.tar'
+        # ------------- TEST ------------------------------------------------------------
+        total_test_loss = 0
+        for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
+            test_loss, dleft = test(imgL, imgR, disp_L)
+            print('Iter %d test loss in val = %.3f' % (batch_idx, test_loss))
+            total_test_loss += test_loss
+            test_step += 1
+            writer.add_scalar("test/batch_error", test_loss , test_step)
+            img_display = torch.cat([disp_L, dleft], 0)
+            img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                           normalize=True, scale_each=True, nrow=test_batch)
+            writer.add_image("test/dleft", img_display, test_step)
+        writer.add_scalar("test/epoch_error", total_test_loss / len(TestImgLoader), epoch)
+        print('epoch %d total test loss in val = %.3f' % (epoch, total_test_loss / len(TestImgLoader)))
+        # ----------------------------------------------------------------------------------
+
+        # SAVE training
+        savefilename = args.savemodel + '/checkpoint_' + str(epoch) + '.tar'
         torch.save({
             'epoch': epoch,
             'state_dict': model.state_dict(),
-                    'train_loss': total_train_loss/len(TrainImgLoader),
-        }, savefilename)
-
-    print('full training time = %.2f HR' %((time.time() - start_full_time)/3600))
-
-    #------------- TEST ------------------------------------------------------------
-    total_test_loss = 0
-    for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
-           test_loss = test(imgL,imgR, disp_L)
-           print('Iter %d test loss = %.3f' %(batch_idx, test_loss))
-           total_test_loss += test_loss
-
-    print('total test loss = %.3f' %(total_test_loss/len(TestImgLoader)))
-    #----------------------------------------------------------------------------------
-    #SAVE test information
-    savefilename = args.savemodel+'testinformation.tar'
-    torch.save({
-            'test_loss': total_test_loss/len(TestImgLoader),
+            'train_loss': total_train_loss / len(TrainImgLoader),
+            'test_loss': total_test_loss / len(TestImgLoader),
         }, savefilename)
 
 

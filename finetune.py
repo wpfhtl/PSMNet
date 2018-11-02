@@ -20,7 +20,8 @@ from dataloader import KITTIloader2015 as ls
 from dataloader import KITTILoader as DA
 
 from models import *
-from logger import Logger
+from tensorboardX import SummaryWriter
+import torchvision.utils as vutils
 
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--maxdisp', type=int ,default=192,
@@ -58,11 +59,11 @@ all_left_img, all_right_img, all_left_disp, test_left_img, test_right_img, test_
 
 TrainImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(all_left_img,all_right_img,all_left_disp, True, colormode=args.colormode),
-         batch_size= 3, shuffle= True, num_workers= 8, drop_last=False)
+         batch_size= 12, shuffle= True, num_workers= 8, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
          DA.myImageFloder(test_left_img,test_right_img,test_left_disp, False, colormode=args.colormode),
-         batch_size= 2, shuffle= False, num_workers= 4, drop_last=False)
+         batch_size= 3, shuffle= False, num_workers= 4, drop_last=False)
 
 if args.model == 'stackhourglass':
     model = stackhourglass(args.maxdisp, colormode=args.colormode)
@@ -76,14 +77,35 @@ if args.cuda:
     model.cuda()
 
 if args.loadmodel is not None:
-    state_dict = torch.load(args.loadmodel)
-    model.load_state_dict(state_dict['state_dict'])
-
+    pretrained_dict = torch.load(args.loadmodel)
+    if 'finetune_'+ args.datatype in (args.loadmodel):
+        start_ind = pretrained_dict['epoch'] + 1
+    else:
+        start_ind = 1
+    model_dict = model.state_dict()
+    pretrained_dict = {k: v for k, v in pretrained_dict['state_dict'].items() if k in model_dict}
+    num_pretrain_items = len(pretrained_dict.items())
+    num_model_items = len(model_dict.items())
+    print('Number of loaded items: {:d}'.format(num_pretrain_items))
+    print('Number of model items: {:d}'.format(num_model_items))
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    # state_dict = torch.load(args.loadmodel)
+    # model.load_state_dict(state_dict['state_dict'])
+print(model)
 print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
-optimizer = optim.Adam(model.parameters(), lr=0.1, betas=(0.9, 0.999))
-
-logger = Logger('./logs')
+pretrained_items = 0
+for i, p in enumerate(model.parameters()):
+    print(i, p.shape)
+    pretrained_items += 1
+    if i < 246:
+        p.requires_grad = False
+    # p.requires_grad = False
+print('Number of pretrained items: {}'.format(pretrained_items))
+optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001, betas=(0.9, 0.999))
+# optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
+writer = SummaryWriter()
 
 def train(imgL,imgR,disp_L):
         model.train()
@@ -118,7 +140,7 @@ def train(imgL,imgR,disp_L):
         loss.backward()
         optimizer.step()
 
-        return loss.item() # loss.data[0]
+        return loss.item(), output3.data.cpu()
 
 def test(imgL,imgR,disp_true):
         model.eval()
@@ -138,12 +160,12 @@ def test(imgL,imgR,disp_true):
         disp_true[index[0][:], index[1][:], index[2][:]] = np.abs(true_disp[index[0][:], index[1][:], index[2][:]]-pred_disp[index[0][:], index[1][:], index[2][:]])
         correct = (disp_true[index[0][:], index[1][:], index[2][:]] < 3)+(disp_true[index[0][:], index[1][:], index[2][:]] < true_disp[index[0][:], index[1][:], index[2][:]]*0.05)      
         torch.cuda.empty_cache()
-
-        return (1-float(torch.sum(correct))/float(len(index[0])))
+        loss = (1 - float(torch.sum(correct)) / float(len(index[0])))
+        return loss, pred_disp
 
 def adjust_learning_rate(optimizer, epoch):
     if epoch <= 200:
-        lr = 0.001
+        lr = 0.0002
     else:
         lr = 0.0001
     print(lr)
@@ -152,71 +174,77 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def main():
-    max_acc=0
-    max_epo=0
+    train_step = 0
+    test_step = 0
+    max_acc = 100
+    max_epo = 0
     start_full_time = time.time()
+    # Test ##
+    total_test_loss = 0
+    for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
+        test_loss, dleft = test(imgL, imgR, disp_L)
+        print('Iter %d 3-px error in val = %.3f' % (batch_idx, test_loss * 100))
+        total_test_loss += test_loss
+        test_step += 1
+        writer.add_scalar("test/batch_error", test_loss * 100, test_step)
+        img_display = torch.cat([disp_L, dleft], 0)
+        img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                       normalize=True, scale_each=True, nrow=1)
+        writer.add_image("test/dleft", img_display, test_step)
+    writer.add_scalar("test/epoch_error", total_test_loss / len(TestImgLoader) * 100, 0)
+    print('epoch %d total 3-px error in val = %.3f' % (0, total_test_loss / len(TestImgLoader) * 100))
 
-    for epoch in range(1, args.epochs+1):
+    for epoch in range(start_ind, args.epochs + 1):
         total_train_loss = 0
         total_test_loss = 0
-        adjust_learning_rate(optimizer,epoch)
-           
+        adjust_learning_rate(optimizer, epoch)
+
         ## training ##
         for batch_idx, (imgL_crop, imgR_crop, disp_crop_L) in enumerate(TrainImgLoader):
             start_time = time.time()
 
-            loss = train(imgL_crop,imgR_crop, disp_crop_L)
-        print('Iter %d training loss = %.3f , time = %.2f' %(batch_idx, loss, time.time() - start_time))
-        total_train_loss += loss
-        print('epoch %d total training loss = %.3f' %(epoch, total_train_loss/len(TrainImgLoader)))
+            loss, dleft = train(imgL_crop, imgR_crop, disp_crop_L)
+            print('Iter %d training loss = %.3f , time = %.2f' % (batch_idx, loss, time.time() - start_time))
+            total_train_loss += loss
+            train_step += 1
+            writer.add_scalar("train/batch_error", loss, train_step)
+            img_display = torch.cat([disp_crop_L, dleft], 0)
+            img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                           normalize=True, scale_each=True, nrow=2)
+            writer.add_image("train/dleft", img_display, train_step)
+        writer.add_scalar("train/epoch_error", total_train_loss / len(TrainImgLoader), epoch)
+        print('epoch %d total training loss = %.3f' % (epoch, total_train_loss / len(TrainImgLoader)))
 
         ## Test ##
-
         for batch_idx, (imgL, imgR, disp_L) in enumerate(TestImgLoader):
-            test_loss = test(imgL,imgR, disp_L)
-            print('Iter %d 3-px error in val = %.3f' %(batch_idx, test_loss*100))
+            test_loss, dleft = test(imgL, imgR, disp_L)
+            print('Iter %d 3-px error in val = %.3f' % (batch_idx, test_loss * 100))
             total_test_loss += test_loss
-
-
-        print('epoch %d total 3-px error in val = %.3f' %(epoch, total_test_loss/len(TestImgLoader)*100))
-        if total_test_loss/len(TestImgLoader)*100 < max_acc:
-            max_acc = total_test_loss/len(TestImgLoader)*100
+            test_step += 1
+            writer.add_scalar("test/batch_error", test_loss * 100, test_step)
+            img_display = torch.cat([disp_L, dleft], 0)
+            img_display = vutils.make_grid(img_display.view([-1, 1, img_display.shape[-2], img_display.shape[-1]]),
+                                           normalize=True, scale_each=True, nrow=1)
+            writer.add_image("test/dleft", img_display, test_step)
+        writer.add_scalar("test/epoch_error", total_test_loss / len(TestImgLoader) * 100, epoch)
+        print('epoch %d total 3-px error in val = %.3f' % (epoch, total_test_loss / len(TestImgLoader) * 100))
+        if total_test_loss / len(TestImgLoader) * 100 < max_acc:
+            max_acc = total_test_loss / len(TestImgLoader) * 100
             max_epo = epoch
-        print('MAX epoch %d total test error = %.3f' %(max_epo, max_acc))
+        print('MAX epoch %d total test error = %.3f' % (max_epo, max_acc))
 
-        #SAVE
-        savefilename = args.savemodel+'finetune_'+str(epoch)+'.tar'
+        # SAVE
+        savefilename = args.savemodel + 'finetune_' + args.datatype + '_' + str(epoch) + '.tar'
         torch.save({
             'epoch': epoch,
             'state_dict': model.state_dict(),
-            'train_loss': total_train_loss/len(TrainImgLoader),
-            'test_loss': total_test_loss/len(TestImgLoader)*100,
+            'train_loss': total_train_loss / len(TrainImgLoader),
+            'test_loss': total_test_loss / len(TestImgLoader) * 100,
         }, savefilename)
 
-        print('full finetune time = %.2f HR' %((time.time() - start_full_time)/3600))
-        print(max_epo)
-        print(max_acc)
-
-        # ================================================================== #
-        #                        Tensorboard Logging                         #
-        # ================================================================== #
-
-        # 1. Log scalar values (scalar summary)
-        info = {'train/loss:': total_train_loss, 'test/loss': total_test_loss}
-        for tag, value in info.items():
-            logger.scalar_summary(tag, value, epoch + 1)
-
-        # 2. Log values and gradients of the parameters (histogram summary)
-        for tag, value in model.named_parameters():
-            tag = tag.replace('.', '/')
-            logger.histo_summary(tag, value.data.cpu().numpy(), epoch+1)
-            logger.histo_summary(tag+'/grad', value.grad.data.cpu().numpy(), epoch+1)
-
-        # 3. weights of network
-        # weights_list = {'fc1_weights': model.module.feature_extraction.firstconv._modules['2']._modules['0'].weight.data.cpu().numpy(),
-        #                 'fc2_weights': }
-        # for tag, weights in weights_list.items():
-        #     logger.image_summary(tag, weights, epoch + 1)
+    print('full finetune time = %.2f HR' % ((time.time() - start_full_time) / 3600))
+    print(max_epo)
+    print(max_acc)
 
 
 if __name__ == '__main__':
