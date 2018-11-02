@@ -48,10 +48,11 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
 if args.KITTI == '2015':
-   from dataloader import KITTI_submission_loader as DA
+    from dataloader import KITTI_submission_loader as DA
+elif args.KITTI == '2012':
+    from dataloader import KITTI_submission_loader2012 as DA
 else:
-   from dataloader import KITTI_submission_loader2012 as DA  
-
+    from dataloader import SecenFlowLoader as DA
 
 test_left_img, test_right_img = DA.dataloader(args.datapath)
 
@@ -108,8 +109,12 @@ def main():
            imgR = np.reshape(imgR_o,[1,1,imgR_o.shape[0],imgR_o.shape[1]])
 
        # pad to (384, 1248)
-       top_pad = 384-imgL.shape[2]
-       left_pad = 1248-imgL.shape[3]
+       if args.KITTI == 'sf':
+           top_pad = 576-imgL.shape[2]
+           left_pad = 960-imgL.shape[3]
+       else:
+           top_pad = 384-imgL.shape[2]
+           left_pad = 1280-imgL.shape[3]
        imgL = np.lib.pad(imgL,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
        imgR = np.lib.pad(imgR,((0,0),(0,0),(top_pad,0),(0,left_pad)),mode='constant',constant_values=0)
 
@@ -117,8 +122,12 @@ def main():
        pred_disp = test(imgL,imgR)
        print('time = %.2f' %(time.time() - start_time))
 
-       top_pad   = 384-imgL_o.shape[0]
-       left_pad  = 1248-imgL_o.shape[1]
+       if args.KITTI == 'sf':
+           top_pad = 576-imgL_o.shape[2]
+           left_pad = 960-imgL_o.shape[3]
+       else:
+           top_pad   = 384-imgL_o.shape[0]
+           left_pad  = 1280-imgL_o.shape[1]
        img = pred_disp[top_pad:,:-left_pad]
        skimage.io.imsave(os.path.join(args.savepath, test_left_img[inx].split('/')[-1]),(img*256).astype('uint16'))
 
